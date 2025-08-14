@@ -449,15 +449,50 @@
     const buttonContainer = document.createElement('div');
     buttonContainer.className = 'flex gap-3';
     
+    // Add explicit styles to ensure button visibility
+    const styleElement = document.createElement('style');
+    styleElement.textContent = `
+      #start-vm-btn, #stop-vm-btn {
+        background-color: #2563eb !important;
+        color: white !important;
+        border: 2px solid #1d4ed8 !important;
+        font-weight: 500 !important;
+      }
+      #stop-vm-btn {
+        background-color: #dc2626 !important;
+        border-color: #b91c1c !important;
+      }
+      #start-vm-btn:hover, #stop-vm-btn:hover {
+        opacity: 0.9 !important;
+      }
+      #start-vm-btn:disabled, #stop-vm-btn:disabled {
+        opacity: 0.5 !important;
+        cursor: not-allowed !important;
+      }
+      button[onclick*="testVMConnection"] {
+        background-color: #2563eb !important;
+        color: white !important;
+        border: 2px solid #1d4ed8 !important;
+        font-weight: 500 !important;
+      }
+      button[onclick*="testVMService"] {
+        background-color: #16a34a !important;
+        color: white !important;
+        border: 2px solid #15803d !important;
+        font-weight: 500 !important;
+      }
+    `;
+    document.head.appendChild(styleElement);
+    
     const startBtn = document.createElement('button');
     startBtn.id = 'start-vm-btn';
-    startBtn.className = 'inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-blue-600 text-white hover:bg-blue-700 h-10 px-4 py-2';
+    startBtn.className = 'inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-blue-600 text-white hover:bg-blue-700 h-10 px-4 py-2 border border-blue-700';
     startBtn.textContent = 'Start Local VM';
     startBtn.addEventListener('click', startLocalVM);
     
     const stopBtn = document.createElement('button');
     stopBtn.id = 'stop-vm-btn';
-    stopBtn.className = 'inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-red-600 text-white hover:bg-red-700 h-10 px-4 py-2';
+    stopBtn.className = 'inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-red-600 text-white hover:bg-red-700 h-10 px-4 py-2 border border-red-700';
     stopBtn.textContent = 'Stop Local VM';
     stopBtn.addEventListener('click', stopLocalVMs);
     stopBtn.style.display = 'none';
@@ -487,8 +522,10 @@
     // Insert after the main container (which contains the entire My Xnodes section)
     mainContainer.parentNode.insertBefore(localVMSection, mainContainer.nextSibling);
     
-    // Update the UI
-    updateLocalVMUI();
+    // Update the UI after a small delay to ensure DOM is ready
+    setTimeout(() => {
+      updateLocalVMUI();
+    }, 100);
   }
   
   async function updateLocalVMStatus() {
@@ -721,6 +758,12 @@
     
     if (!statusElement) return;
     
+    // Check if buttons exist before trying to modify them
+    if (!startBtn || !stopBtn) {
+      console.log('⚠️ Buttons not found yet, skipping UI update');
+      return;
+    }
+    
     // Store expanded state before updating
     const expandedVMs = new Set();
     localDevState.vms.forEach(vm => {
@@ -733,7 +776,7 @@
     if (localDevState.vms.length === 0) {
       statusElement.innerHTML = `
         <div class="p-3 border border-blue-200 rounded-lg bg-blue-100">
-          <p class="text-blue-800">No local VMs detected. Click "Start Local VM" to create one.</p>
+          <p class="text-blue-800 font-medium">No local VMs detected. Click "Start Local VM" to create one.</p>
         </div>
       `;
       startBtn.disabled = false;
@@ -790,9 +833,23 @@
                   </div>
                   
                   <div class="border-t border-blue-200 pt-4">
-                    <p class="font-medium text-blue-900 mb-2">QEMU VM Details:</p>
+                    <p class="font-medium text-blue-900 mb-2">Installation Progress:</p>
                     <div class="bg-blue-50 p-3 rounded text-xs font-mono text-blue-800" id="qemu-details-${vm.pid}">
-                      Loading QEMU details...
+                      <div class="space-y-2">
+                        <div class="flex items-center gap-2">
+                          <div class="w-2 h-2 bg-blue-500 rounded-full"></div>
+                          <span class="text-blue-800">Ubuntu Live Server booting...</span>
+                        </div>
+                        <div class="text-xs text-blue-600">
+                          This can take 5-15 minutes. The VM is currently booting from the Ubuntu ISO.
+                        </div>
+                        <div class="mt-2 p-2 bg-blue-100 rounded border border-blue-200">
+                          <div class="text-xs font-medium text-blue-800 mb-1">Current Status:</div>
+                          <div class="text-xs text-blue-700">• Booting from Ubuntu 24.04.3 Live Server ISO</div>
+                          <div class="text-xs text-blue-700">• Disk: ${vm.disk || '0'} MB (will grow to ~2-4 GB when Ubuntu installs)</div>
+                          <div class="text-xs text-blue-700">• Next: Ubuntu installation to disk, then NixOS conversion</div>
+                        </div>
+                      </div>
                     </div>
                   </div>
                   
@@ -800,11 +857,11 @@
                     <p class="font-medium text-blue-900 mb-2">Connection Test:</p>
                     <div class="flex gap-2">
                       <button onclick="event.stopPropagation(); testVMConnection('${vm.pid}', '${vm.host}', ${vm.port})" 
-                              class="px-3 py-2 bg-blue-600 text-white text-xs rounded hover:bg-blue-700 transition-colors">
+                              class="px-3 py-2 bg-blue-600 text-white text-xs rounded hover:bg-blue-700 transition-colors border border-blue-700 font-medium">
                         Test SSH Connection
                       </button>
                       <button onclick="event.stopPropagation(); testVMService('${vm.pid}', '${vm.host}', 443)" 
-                              class="px-3 py-2 bg-green-600 text-white text-xs rounded hover:bg-green-700 transition-colors">
+                              class="px-3 py-2 bg-green-600 text-white text-xs rounded hover:bg-green-700 transition-colors border border-green-700 font-medium">
                         Test HTTPS (443)
                       </button>
                     </div>
