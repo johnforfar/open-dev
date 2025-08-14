@@ -20,11 +20,61 @@ app.get('/runtime-integration.js', (req, res) => {
   res.sendFile(path.join(__dirname, 'runtime-integration.js'));
 });
 
+// Serve the debug script
+app.get('/debug-bookmarklet.js', (req, res) => {
+  res.setHeader('Content-Type', 'application/javascript');
+  res.sendFile(path.join(__dirname, 'debug-bookmarklet.js'));
+});
+
 // API Routes
+
+// Check QEMU availability
+app.get('/api/qemu-check', async (req, res) => {
+  try {
+    // Check if QEMU is installed and accessible
+    let qemuAvailable = false;
+    let qemuVersion = '';
+    let error = '';
+    
+    try {
+      // Try to get QEMU version
+      const { stdout } = await execAsync('qemu-system-aarch64 --version');
+      qemuAvailable = true;
+      qemuVersion = stdout.split('\n')[0]; // First line usually contains version
+    } catch (qemuError) {
+      qemuAvailable = false;
+      error = qemuError.message;
+    }
+    
+    res.json({
+      available: qemuAvailable,
+      version: qemuVersion,
+      error: error,
+      timestamp: new Date().toISOString(),
+    });
+    
+  } catch (error) {
+    console.error('Error checking QEMU availability:', error);
+    res.json({
+      available: false,
+      version: '',
+      error: error.message,
+      timestamp: new Date().toISOString(),
+    });
+  }
+});
+
 app.get('/api/vm-status', async (req, res) => {
   try {
     // Check for running QEMU VMs
-    const { stdout } = await execAsync('ps aux | grep qemu-system-aarch64 | grep -v grep');
+    let stdout = '';
+    try {
+      const result = await execAsync('ps aux | grep qemu-system-aarch64 | grep -v grep');
+      stdout = result.stdout;
+    } catch (grepError) {
+      // This is expected when no QEMU processes are running
+      stdout = '';
+    }
     
     const vms = [];
     

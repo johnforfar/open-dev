@@ -15,15 +15,15 @@
     LOCAL_DEV_API: 'http://localhost:3001',
     POLL_INTERVAL: 5000,
     SELECTORS: {
-      // Main page elements - updated to be more specific and reliable
-      MAIN_PAGE: '.flex.flex-col.gap-5',
-      BUTTON_CONTAINER: '.flex.gap-3.items-center',
-      XNODES_SECTION: '.\\@container, div[class*="container"], [class*="@container"]',
+      // Main page elements - multiple fallback strategies
+      MAIN_PAGE: '.flex.flex-col.gap-5, div[class*="flex"][class*="flex-col"][class*="gap-5"], div[class*="gap-5"]',
+      BUTTON_CONTAINER: '.flex.gap-3.items-center, div[class*="flex"][class*="gap-3"][class*="items-center"]',
+      XNODES_SECTION: '.\\@container, div[class*="container"], [class*="@container"], div[class*="gap-2"]',
       
-      // Button selectors - using more reliable methods
-      DEPLOY_BUTTON: 'button[class*="bg-blue"]',
-      IMPORT_BUTTON: 'button[class*="border"]',
-      RESET_BUTTON: 'button[class*="bg-red"]',
+      // Button selectors - multiple fallback strategies
+      DEPLOY_BUTTON: 'button[class*="bg-blue"], button[class*="bg-primary"], button[class*="primary"]',
+      IMPORT_BUTTON: 'button[class*="border"], button[class*="secondary"]',
+      RESET_BUTTON: 'button[class*="bg-red"], button[class*="destructive"]',
     }
   };
   
@@ -33,7 +33,9 @@
     vms: [],
     isInitialized: false,
     lastVMCount: 0, // Track VM count to prevent unnecessary UI updates
-    stableVMs: new Set() // Track VMs that should remain visible
+    stableVMs: new Set(), // Track VMs that should remain visible
+    qemuAvailable: null, // null = unknown, true = available, false = not available
+    qemuInstalling: false
   };
   
   // Utility functions
@@ -42,19 +44,71 @@
            window.location.hostname === '127.0.0.1';
   }
   
+  async function checkQEMUAvailability() {
+    try {
+      // Check if QEMU is available by trying to start a VM
+      const response = await fetch(`${CONFIG.LOCAL_DEV_API}/api/qemu-check`);
+      if (response.ok) {
+        const data = await response.json();
+        localDevState.qemuAvailable = data.available;
+        console.log('🔍 QEMU availability check:', data);
+        return data.available;
+      }
+    } catch (error) {
+      console.log('🔍 QEMU check failed, assuming not available:', error);
+      localDevState.qemuAvailable = false;
+    }
+    return false;
+  }
+  
+  function showQEMUInstallationPrompt() {
+    const statusElement = document.getElementById('local-vm-status');
+    if (!statusElement) return;
+    
+    statusElement.innerHTML = `
+      <div class="p-4 border border-orange-200 rounded-lg bg-orange-50">
+        <div class="flex items-center gap-3 mb-4">
+          <div class="text-orange-600 text-2xl">⚠️</div>
+          <h3 class="text-lg font-semibold text-orange-900">QEMU Not Installed</h3>
+        </div>
+        
+        <div class="space-y-3">
+          <p class="text-orange-800">
+            QEMU virtualization software is required to run local VMs. 
+            Please install it first using the terminal:
+          </p>
+          
+          <div class="bg-orange-100 p-3 rounded-lg">
+            <div class="font-mono text-sm text-orange-800">
+              <div>cd /path/to/open-dev</div>
+              <div>make setup</div>
+            </div>
+          </div>
+          
+          <p class="text-orange-800 text-sm">
+            Or run: <code class="bg-orange-200 px-2 py-1 rounded">brew install qemu</code>
+          </p>
+        </div>
+      </div>
+    `;
+  }
+  
   function isOnMainPage() {
     // Check if we're on the main page by looking for key elements
-    const hasMainPage = document.querySelector(CONFIG.SELECTORS.MAIN_PAGE);
+    const hasMainPage = findMainPageElement();
     const hasXnodesSection = findXnodesSection();
-    const hasDeployButton = document.querySelector(CONFIG.SELECTORS.DEPLOY_BUTTON) || 
-                           document.querySelector(CONFIG.SELECTORS.IMPORT_BUTTON) ||
-                           document.querySelector(CONFIG.SELECTORS.RESET_BUTTON);
+    const buttonInfo = findButtonsByText();
+    const hasDeployButton = buttonInfo.deploy || buttonInfo.import || buttonInfo.reset;
     
-    const isMainPage = hasMainPage && hasXnodesSection && hasDeployButton;
+    // More lenient check: if we have the main structure OR we're on the main page URL, proceed
+    const isMainPage = (hasMainPage && hasXnodesSection) || 
+                      (window.location.pathname === '/' && hasXnodesSection);
+    
     console.log('📍 Page check:', {
       hasMainPage: !!hasMainPage,
       hasXnodesSection: !!hasXnodesSection,
       hasDeployButton: !!hasDeployButton,
+      buttonInfo: buttonInfo,
       isMainPage
     });
     
@@ -63,7 +117,7 @@
   
   function isPageReady() {
     // Check if we're on the main page and have the necessary elements
-    const mainPage = document.querySelector(CONFIG.SELECTORS.MAIN_PAGE);
+    const mainPage = findMainPageElement();
     const xnodesSection = findXnodesSection();
     
     if (!mainPage) {
@@ -85,22 +139,6 @@
     let section = document.querySelector(CONFIG.SELECTORS.XNODES_SECTION);
     
     if (!section) {
-      // Try to find by content - look for elements containing "No Xnodes found" or similar
-      const elements = document.querySelectorAll('*');
-      for (const el of elements) {
-        if (el.textContent && (
-          el.textContent.includes('No Xnodes found') ||
-          el.textContent.includes('Your Xnodes are saved') ||
-          el.textContent.includes('import your Xnodes')
-        )) {
-          section = el.closest('div') || el;
-          console.log('Found xnodes section by content:', section);
-          break;
-        }
-      }
-    }
-    
-    if (!section) {
       // Try to find by looking for the My Xnodes section
       const myXnodesSection = document.querySelector('[id="My_Xnodes"]')?.closest('.flex.flex-col');
       if (myXnodesSection) {
@@ -109,7 +147,140 @@
       }
     }
     
+    if (!section) {
+      // Try to find by content - look for elements containing "No Xnodes found" or similar
+      const elements = document.querySelectorAll('div');
+      for (const el of elements) {
+        if (el.textContent && (
+          el.textContent.includes('No Xnodes found') ||
+          el.textContent.includes('Your Xnodes are saved') ||
+          el.textContent.includes('import your Xnodes')
+        )) {
+          // Make sure we get a reasonable container, not the entire page
+          if (el.tagName === 'DIV' && !el.classList.contains('min-h-screen')) {
+            section = el;
+            console.log('Found xnodes section by content:', section);
+            break;
+          }
+        }
+      }
+    }
+    
+    // Final fallback: look for the main container that has the My Xnodes title
+    if (!section) {
+      const myXnodesTitle = document.querySelector('[id="My_Xnodes"]');
+      if (myXnodesTitle) {
+        // Go up to find the main container
+        section = myXnodesTitle.closest('.flex.flex-col') || myXnodesTitle.parentElement;
+        console.log('Found xnodes section by fallback:', section);
+      }
+    }
+    
+    // If we still don't have a section, look for the main content area
+    if (!section) {
+      // Look for the main content div that contains the error message
+      const mainContent = document.querySelector('.m-2');
+      if (mainContent) {
+        section = mainContent;
+        console.log('Found main content area for injection:', section);
+      }
+    }
+    
+    // Validate that we didn't get the entire HTML document
+    if (section && section.tagName === 'HTML') {
+      console.log('❌ Got HTML element, trying to find better target');
+      section = null;
+      
+      // Try to find the actual content area
+      const contentArea = document.querySelector('.m-2') || 
+                         document.querySelector('[id="My_Xnodes"]')?.closest('.flex.flex-col') ||
+                         document.querySelector('.flex.flex-col.gap-5');
+      
+      if (contentArea) {
+        section = contentArea;
+        console.log('Found better target after HTML validation:', section);
+      }
+    }
+    
     return section;
+  }
+  
+  function findMainPageElement() {
+    // Try multiple strategies to find the main page element
+    let mainPage = document.querySelector(CONFIG.SELECTORS.MAIN_PAGE);
+    
+    if (!mainPage) {
+      // Strategy 1: Look for elements with gap-5 class
+      mainPage = document.querySelector('[class*="gap-5"]');
+      console.log('Strategy 1 - gap-5:', mainPage);
+    }
+    
+    if (!mainPage) {
+      // Strategy 2: Look for elements containing "My Xnodes" text
+      const elements = document.querySelectorAll('div, span, h1, h2, h3, h4, h5, h6');
+      for (const el of elements) {
+        if (el.textContent && el.textContent.includes('My Xnodes')) {
+          // Make sure we get a reasonable container, not the entire page
+          if (el.tagName !== 'HTML' && el.tagName !== 'BODY') {
+            mainPage = el.closest('[class*="flex"]') || el.closest('[class*="gap"]') || el;
+            console.log('Strategy 2 - My Xnodes:', mainPage);
+            break;
+          }
+        }
+      }
+    }
+    
+    if (!mainPage) {
+      // Strategy 3: Look for any div with multiple children that might be the main container
+      const divs = document.querySelectorAll('div');
+      for (const div of divs) {
+        if (div.children.length >= 3 && div.querySelector('button')) {
+          mainPage = div;
+          console.log('Strategy 3 - div with buttons:', mainPage);
+          break;
+        }
+      }
+    }
+    
+    // Strategy 4: If we still don't have a main page, use the xnodes section as fallback
+    if (!mainPage) {
+      const xnodesSection = findXnodesSection();
+      if (xnodesSection) {
+        // Go up to find a reasonable container
+        mainPage = xnodesSection.closest('.flex.flex-col') || 
+                   xnodesSection.closest('.m-2') || 
+                   xnodesSection;
+        console.log('Strategy 4 - fallback to xnodes section:', mainPage);
+      }
+    }
+    
+    return mainPage;
+  }
+  
+  function findButtonsByText() {
+    // Find buttons by their text content since CSS selectors might not work
+    const buttons = document.querySelectorAll('button');
+    const buttonInfo = {
+      deploy: null,
+      import: null,
+      reset: null
+    };
+    
+    buttons.forEach(button => {
+      const text = button.textContent?.toLowerCase() || '';
+      if (text.includes('deploy')) {
+        buttonInfo.deploy = button;
+        console.log('Found Deploy button by text:', button);
+      } else if (text.includes('import')) {
+        buttonInfo.import = button;
+        console.log('Found Import button by text:', button);
+      } else if (text.includes('reset')) {
+        buttonInfo.reset = button;
+        console.log('Found Reset button by text:', button);
+      }
+    });
+    
+    return buttonInfo;
   }
   
   function logPageState() {
@@ -189,15 +360,72 @@
   }
   
   function showLocalVMDialog() {
+    console.log('🔧 showLocalVMDialog called');
+    
     // Check if we already have the local VM section
     if (document.getElementById('local-vm-section')) {
+      console.log('ℹ️ Local VM section already exists');
       return; // Already exists
     }
     
     // Find the My Xnodes section to inject after
-    const myXnodesSection = document.querySelector('[id="My_Xnodes"]')?.closest('.flex.flex-col');
-    if (!myXnodesSection) {
-      console.log('Could not find My Xnodes section');
+    console.log('🔍 Looking for My Xnodes section...');
+    
+    // Debug: Check what IDs actually exist in the DOM
+    console.log('🔍 All elements with IDs:');
+    document.querySelectorAll('[id]').forEach(el => {
+      console.log(`  ID: "${el.id}" - Tag: ${el.tagName} - Text: "${el.textContent?.substring(0, 50)}"`);
+    });
+    
+    // Try multiple strategies to find the title
+    let myXnodesTitle = document.querySelector('[id="My_Xnodes"]');
+    if (!myXnodesTitle) {
+      myXnodesTitle = document.querySelector('[id="My Xnodes"]'); // Try with space
+    }
+    if (!myXnodesTitle) {
+      // Look for any element containing "My Xnodes" text
+      const elements = document.querySelectorAll('*');
+      for (const el of elements) {
+        if (el.textContent && el.textContent.trim() === 'My Xnodes') {
+          myXnodesTitle = el;
+          console.log('🔍 Found My Xnodes by text content:', el);
+          break;
+        }
+      }
+    }
+    
+    console.log('🔍 My Xnodes title element:', myXnodesTitle);
+    
+    // Since the ID isn't working, let's target the structure directly
+    console.log('🔍 Trying direct structure targeting...');
+    
+    // We already know the main page element exists from earlier detection
+    // Let's use that instead of trying to find it again
+    const mainPageElement = findMainPageElement();
+    console.log('🔍 Main page element from findMainPageElement:', mainPageElement);
+    
+    let mainContainer = null;
+    if (mainPageElement) {
+      mainContainer = mainPageElement;
+      console.log('🔍 Using main page element as container:', mainContainer);
+    } else {
+      // Fallback: look for any flex.flex-col.gap-5 that contains "My Xnodes" text
+      const containers = document.querySelectorAll('.flex.flex-col.gap-5');
+      for (const container of containers) {
+        if (container.textContent && container.textContent.includes('My Xnodes')) {
+          mainContainer = container;
+          console.log('🔍 Found main container by text content:', mainContainer);
+          break;
+        }
+      }
+    }
+    
+    if (!mainContainer) {
+      console.log('❌ Could not find main container');
+      console.log('🔍 Available flex.flex-col.gap-5 elements:');
+      document.querySelectorAll('.flex.flex-col.gap-5').forEach((el, i) => {
+        console.log(`  ${i}:`, el.tagName, el.className, el.textContent?.substring(0, 100));
+      });
       return;
     }
     
@@ -234,22 +462,33 @@
     stopBtn.addEventListener('click', stopLocalVMs);
     stopBtn.style.display = 'none';
     
-    buttonContainer.appendChild(startBtn);
-    buttonContainer.appendChild(stopBtn);
+    // Check QEMU availability and show appropriate UI
+    checkQEMUAvailability().then(qemuAvailable => {
+      if (qemuAvailable) {
+        buttonContainer.appendChild(startBtn);
+        buttonContainer.appendChild(stopBtn);
+        // Start polling for VM status
+        updateLocalVMStatus();
+        setInterval(updateLocalVMStatus, CONFIG.POLL_INTERVAL);
+      } else {
+        showQEMUInstallationPrompt();
+        // Disable start button when QEMU is not available
+        startBtn.disabled = true;
+        startBtn.textContent = 'QEMU Required';
+        startBtn.className = startBtn.className.replace('bg-blue-600', 'bg-gray-400');
+        buttonContainer.appendChild(startBtn);
+      }
+    });
     
     localVMSection.appendChild(header);
     localVMSection.appendChild(statusContainer);
     localVMSection.appendChild(buttonContainer);
     
-    // Insert after the My Xnodes section
-    myXnodesSection.parentNode.insertBefore(localVMSection, myXnodesSection.nextSibling);
+    // Insert after the main container (which contains the entire My Xnodes section)
+    mainContainer.parentNode.insertBefore(localVMSection, mainContainer.nextSibling);
     
     // Update the UI
     updateLocalVMUI();
-    
-    // Start polling for VM status
-    updateLocalVMStatus();
-    setInterval(updateLocalVMStatus, CONFIG.POLL_INTERVAL);
   }
   
   async function updateLocalVMStatus() {
@@ -630,13 +869,18 @@
   }
   
   function addLocalVMsToXnodesList() {
+    console.log('🔧 addLocalVMsToXnodesList called');
+    
     // This function will add local VMs to the existing xnodes list
     // For now, we'll just update the "No Xnodes found" message
     updateNoXnodesMessage();
     
     // Also inject the local VM management section if it doesn't exist
     if (!document.getElementById('local-vm-section')) {
+      console.log('🔧 Local VM section does not exist, calling showLocalVMDialog...');
       showLocalVMDialog();
+    } else {
+      console.log('ℹ️ Local VM section already exists');
     }
   }
   

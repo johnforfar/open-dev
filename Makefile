@@ -1,4 +1,4 @@
-.PHONY: help dev start-vm stop-vm status clean logs setup update-frontend
+.PHONY: help dev start-vm stop-vm status clean logs setup update-frontend check-qemu
 
 # Default target
 help:
@@ -7,12 +7,15 @@ help:
 	@echo "Commands:"
 	@echo "  make setup           - Initial setup (dependencies + submodules)"
 	@echo "  make dev             - Start integrated development environment"
+	@echo "  make check-qemu      - Check QEMU installation status"
 	@echo "  make start-vm        - Start automated Ubuntu → NixOS VM"
 	@echo "  make stop-vm         - Stop running VM"
 	@echo "  make status          - Check VM status"
 	@echo "  make clean           - Clean up VM files"
 	@echo "  make logs            - Show VM logs"
 	@echo "  make update-frontend - Update xnode-manager-frontend submodule"
+	@echo "  make quick-check     - Quick dependency check"
+	@echo "  make quick-dev       - Quick dev start (assumes setup complete)"
 	@echo ""
 
 # Initial setup
@@ -22,7 +25,19 @@ setup: install-deps download-iso init-submodules
 # Install dependencies
 install-deps:
 	@echo "📦 Installing dependencies..."
-	@brew install qemu cdrtools
+	@echo "🔍 Checking if QEMU is already installed..."
+	@if ! command -v qemu-system-aarch64 >/dev/null 2>&1; then \
+		echo "📥 Installing QEMU via Homebrew..."; \
+		brew install qemu; \
+	else \
+		echo "✅ QEMU is already installed"; \
+	fi
+	@if ! command -v mkisofs >/dev/null 2>&1; then \
+		echo "📥 Installing cdrtools..."; \
+		brew install cdrtools; \
+	else \
+		echo "✅ cdrtools is already installed"; \
+	fi
 	@echo "✅ Dependencies installed"
 
 # Download Ubuntu ISO
@@ -42,7 +57,7 @@ init-submodules:
 	@echo "✅ Submodules initialized"
 
 # Start integrated development environment
-dev:
+dev: check-qemu
 	@echo "🚀 Starting OpenDev integrated development environment..."
 	@echo "📱 Main Frontend: http://localhost:3000"
 	@echo "🔧 Local Dev Server: http://localhost:3001"
@@ -77,6 +92,18 @@ status:
 	@echo "📊 VM Status:"
 	@cd xnodeos-vm && make status
 
+# Check QEMU installation
+check-qemu:
+	@echo "🔍 Checking QEMU installation..."
+	@if command -v qemu-system-aarch64 >/dev/null 2>&1; then \
+		echo "✅ QEMU is installed and accessible"; \
+		qemu-system-aarch64 --version | head -1; \
+	else \
+		echo "❌ QEMU is not installed or not accessible"; \
+		echo "💡 Run 'make setup' to install dependencies"; \
+		exit 1; \
+	fi
+
 # Clean up VM files
 clean:
 	@echo "🧹 Cleaning up VM files..."
@@ -104,6 +131,12 @@ integrate-local-dev:
 quick-dev:
 	@echo "⚡ Quick development start..."
 	@make dev
+
+# Quick setup check (just verify dependencies)
+quick-check:
+	@echo "🔍 Quick dependency check..."
+	@make check-qemu
+	@echo "✅ All dependencies are ready!"
 
 # Full development cycle
 dev-cycle: clean start-vm dev
