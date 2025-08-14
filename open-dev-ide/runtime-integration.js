@@ -35,7 +35,9 @@
     lastVMCount: 0, // Track VM count to prevent unnecessary UI updates
     stableVMs: new Set(), // Track VMs that should remain visible
     qemuAvailable: null, // null = unknown, true = available, false = not available
-    qemuInstalling: false
+    qemuInstalling: false,
+    vagrantAvailable: null, // null = unknown, true = available, false = not available
+    currentProvider: 'vagrant' // 'vagrant' is now the default
   };
   
   // Utility functions
@@ -57,6 +59,22 @@
     } catch (error) {
       console.log('🔍 QEMU check failed, assuming not available:', error);
       localDevState.qemuAvailable = false;
+    }
+    return false;
+  }
+  
+  async function checkVagrantAvailability() {
+    try {
+      const response = await fetch(`${CONFIG.LOCAL_DEV_API}/api/vagrant-check`);
+      if (response.ok) {
+        const data = await response.json();
+        localDevState.vagrantAvailable = data.available;
+        console.log('🔍 Vagrant availability check:', data);
+        return data.available;
+      }
+    } catch (error) {
+      console.log('🔍 Vagrant check failed, assuming not available:', error);
+      localDevState.vagrantAvailable = false;
     }
     return false;
   }
@@ -88,6 +106,77 @@
           <p class="text-orange-800 text-sm">
             Or run: <code class="bg-orange-200 px-2 py-1 rounded">brew install qemu</code>
           </p>
+        </div>
+      </div>
+    `;
+  }
+  
+  function updateProviderUI(provider) {
+    const statusElement = document.getElementById('local-vm-status');
+    const startBtn = document.getElementById('start-vm-btn');
+    const stopBtn = document.getElementById('stop-vm-btn');
+    
+    if (!statusElement || !startBtn || !stopBtn) return;
+    
+    localDevState.currentProvider = provider;
+    
+    if (provider === 'vagrant') {
+      // Show Vagrant-specific UI
+      startBtn.textContent = 'Start Vagrant VM';
+      startBtn.onclick = startVagrantVM;
+      startBtn.disabled = false;
+      startBtn.className = startBtn.className.replace('bg-gray-400', 'bg-blue-600');
+      
+      // Check Vagrant availability
+      checkVagrantAvailability().then(available => {
+        if (available) {
+          updateVagrantVMStatus();
+          setInterval(updateVagrantVMStatus, CONFIG.POLL_INTERVAL);
+        } else {
+          showVagrantInstallationPrompt();
+        }
+      });
+    } else {
+      // Show QEMU-specific UI
+      startBtn.textContent = 'Start Local VM';
+      startBtn.onclick = startLocalVM;
+      startBtn.disabled = false;
+      startBtn.className = startBtn.className.replace('bg-gray-400', 'bg-blue-600');
+      
+      // Check QEMU availability
+      checkQEMUAvailability().then(available => {
+        if (available) {
+          updateLocalVMStatus();
+          setInterval(updateLocalVMStatus, CONFIG.POLL_INTERVAL);
+        } else {
+          showQEMUInstallationPrompt();
+        }
+      });
+    }
+  }
+  
+  function showVagrantInstallationPrompt() {
+    const statusElement = document.getElementById('local-vm-status');
+    if (!statusElement) return;
+    
+    statusElement.innerHTML = `
+      <div class="p-4 border border-orange-200 rounded-lg bg-orange-50">
+        <div class="flex items-center gap-3 mb-4">
+          <div class="text-orange-600 text-2xl">⚠️</div>
+          <h3 class="text-lg font-semibold text-orange-900">Vagrant Not Installed</h3>
+        </div>
+        
+        <div class="space-y-3">
+          <p class="text-orange-800">
+            Vagrant is required to manage VMs. Please install it first:
+          </p>
+          
+          <div class="bg-orange-100 p-3 rounded-lg">
+            <div class="font-mono text-sm text-orange-800">
+              <div># Download from https://www.vagrantup.com/downloads</div>
+              <div># Or use Homebrew: brew install vagrant</div>
+            </div>
+          </div>
         </div>
       </div>
     `;
@@ -441,6 +530,25 @@
       <h2 class="text-lg font-semibold">Local Development VM</h2>
     `;
     
+    // Create provider selector
+    const providerSelector = document.createElement('div');
+    providerSelector.className = 'flex items-center gap-3 mb-4';
+    providerSelector.innerHTML = `
+      <label class="text-sm font-medium text-gray-700">Provider:</label>
+      <select id="vm-provider" class="px-3 py-1 border border-gray-300 rounded-md text-sm">
+        <option value="qemu">QEMU (Direct)</option>
+        <option value="vagrant" selected>Vagrant + QEMU</option>
+      </select>
+    `;
+    
+    // Add provider change handler
+    const providerSelect = providerSelector.querySelector('#vm-provider');
+    providerSelect.addEventListener('change', (e) => {
+      const provider = e.target.value;
+      console.log('🔧 Provider changed to:', provider);
+      updateProviderUI(provider);
+    });
+    
     // Create the status container
     const statusContainer = document.createElement('div');
     statusContainer.id = 'local-vm-status';
@@ -449,73 +557,26 @@
     const buttonContainer = document.createElement('div');
     buttonContainer.className = 'flex gap-3';
     
-    // Add explicit styles to ensure button visibility
-    const styleElement = document.createElement('style');
-    styleElement.textContent = `
-      #start-vm-btn, #stop-vm-btn {
-        background-color: #2563eb !important;
-        color: white !important;
-        border: 2px solid #1d4ed8 !important;
-        font-weight: 500 !important;
-      }
-      #stop-vm-btn {
-        background-color: #dc2626 !important;
-        border-color: #b91c1c !important;
-      }
-      #start-vm-btn:hover, #stop-vm-btn:hover {
-        opacity: 0.9 !important;
-      }
-      #start-vm-btn:disabled, #stop-vm-btn:disabled {
-        opacity: 0.5 !important;
-        cursor: not-allowed !important;
-      }
-      button[onclick*="testVMConnection"] {
-        background-color: #2563eb !important;
-        color: white !important;
-        border: 2px solid #1d4ed8 !important;
-        font-weight: 500 !important;
-      }
-      button[onclick*="testVMService"] {
-        background-color: #16a34a !important;
-        color: white !important;
-        border: 2px solid #15803d !important;
-        font-weight: 500 !important;
-      }
-    `;
-    document.head.appendChild(styleElement);
-    
     const startBtn = document.createElement('button');
     startBtn.id = 'start-vm-btn';
-    startBtn.className = 'inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-blue-600 text-white hover:bg-blue-700 h-10 px-4 py-2 border border-blue-700';
+    startBtn.className = 'inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-blue-600 text-white hover:bg-blue-700 h-10 px-4 py-2';
     startBtn.textContent = 'Start Local VM';
     startBtn.addEventListener('click', startLocalVM);
     
     const stopBtn = document.createElement('button');
     stopBtn.id = 'stop-vm-btn';
-    stopBtn.className = 'inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-red-600 text-white hover:bg-red-700 h-10 px-4 py-2 border border-red-700';
+    stopBtn.className = 'inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-red-600 text-white hover:bg-red-700 h-10 px-4 py-2';
     stopBtn.textContent = 'Stop Local VM';
     stopBtn.addEventListener('click', stopLocalVMs);
     stopBtn.style.display = 'none';
     
-    // Check QEMU availability and show appropriate UI
-    checkQEMUAvailability().then(qemuAvailable => {
-      if (qemuAvailable) {
-        buttonContainer.appendChild(startBtn);
-        buttonContainer.appendChild(stopBtn);
-        // Start polling for VM status
-        updateLocalVMStatus();
-        setInterval(updateLocalVMStatus, CONFIG.POLL_INTERVAL);
-      } else {
-        showQEMUInstallationPrompt();
-        // Disable start button when QEMU is not available
-        startBtn.disabled = true;
-        startBtn.textContent = 'QEMU Required';
-        startBtn.className = startBtn.className.replace('bg-blue-600', 'bg-gray-400');
-        buttonContainer.appendChild(startBtn);
-      }
-    });
+    // Initialize with default provider (Vagrant)
+    buttonContainer.appendChild(startBtn);
+    buttonContainer.appendChild(stopBtn);
+    updateProviderUI('vagrant');
     
     localVMSection.appendChild(header);
+    localVMSection.appendChild(providerSelector);
     localVMSection.appendChild(statusContainer);
     localVMSection.appendChild(buttonContainer);
     
@@ -524,7 +585,12 @@
     
     // Update the UI after a small delay to ensure DOM is ready
     setTimeout(() => {
-      updateLocalVMUI();
+      // Since Vagrant is the default provider, call the Vagrant update function
+      if (localDevState.currentProvider === 'vagrant') {
+        updateVagrantVMStatus();
+      } else {
+        updateLocalVMUI();
+      }
     }, 100);
   }
   
@@ -554,6 +620,97 @@
       }
     } catch (error) {
       console.error('Failed to fetch VM status:', error);
+    }
+  }
+  
+  async function updateVagrantVMStatus() {
+    try {
+      const response = await fetch(`${CONFIG.LOCAL_DEV_API}/api/vagrant-status`);
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success) {
+          const newVMs = data.vms || [];
+          
+          // Only update if VM count changed or if we have new VMs
+          if (newVMs.length !== localDevState.lastVMCount || 
+              newVMs.some(vm => !localDevState.stableVMs.has(vm.name))) {
+            
+            localDevState.vms = newVMs;
+            localDevState.lastVMCount = newVMs.length;
+            
+            // Add running VMs to stable set
+            newVMs.forEach(vm => {
+              if (vm.status === 'running') {
+                localDevState.stableVMs.add(vm.name);
+              }
+            });
+            
+            // For running VMs, get additional details
+            for (const vm of newVMs) {
+              if (vm.status === 'running') {
+                await updateVagrantVMDetails(vm);
+              }
+            }
+            
+            updateLocalVMUI();
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Failed to fetch Vagrant VM status:', error);
+    }
+  }
+  
+  async function updateVagrantVMDetails(vm) {
+    try {
+      // Get process info for the VM
+      const processInfo = await getVagrantProcessInfo(vm.name);
+      
+      // Update VM object with detailed info
+      vm.pid = processInfo.pid;
+      vm.cpu = processInfo.cpu;
+      vm.memory = processInfo.memory;
+      vm.uptime = processInfo.uptime;
+      vm.osInfo = processInfo.osInfo;
+      
+      console.log('🔍 Updated Vagrant VM details:', vm);
+    } catch (error) {
+      console.error('Failed to update Vagrant VM details:', error);
+    }
+  }
+  
+  async function getVagrantProcessInfo(vmName) {
+    try {
+      // Get detailed Vagrant VM info
+      const response = await fetch(`${CONFIG.LOCAL_DEV_API}/api/vagrant-vm-details/${vmName}`);
+      const data = await response.json();
+      
+      if (data.success && data.vm) {
+        return {
+          pid: data.vm.pid,
+          cpu: data.vm.cpu || 0,
+          memory: data.vm.memory || 0,
+          uptime: data.vm.uptime || 'Unknown',
+          osInfo: data.vm.osInfo || 'Ubuntu 22.10 ARM64 (Vagrant)'
+        };
+      }
+      
+      return {
+        pid: 'Unknown',
+        cpu: 0,
+        memory: 0,
+        uptime: 'Unknown',
+        osInfo: 'Ubuntu 22.10 ARM64 (Vagrant)'
+      };
+    } catch (error) {
+      console.error('Failed to get Vagrant process info:', error);
+      return {
+        pid: 'Error',
+        cpu: 0,
+        memory: 0,
+        uptime: 'Error',
+        osInfo: 'Ubuntu 22.10 ARM64 (Vagrant)'
+      };
     }
   }
   
@@ -643,6 +800,46 @@
     } catch (error) {
       hideDownloadProgress();
       console.error('Failed to start local VM:', error);
+    }
+  }
+  
+  async function startVagrantVM() {
+    const startBtn = document.getElementById('start-vm-btn');
+    startBtn.disabled = true;
+    startBtn.textContent = 'Starting Vagrant VM...';
+    
+    try {
+      const response = await fetch(`${CONFIG.LOCAL_DEV_API}/api/vagrant-up`, { method: 'POST' });
+      if (response.ok) {
+        const data = await response.json();
+        
+        if (data.success) {
+          startBtn.textContent = 'Vagrant VM Started!';
+          startBtn.className = startBtn.className.replace('bg-blue-600', 'bg-green-600');
+          
+          // Update VM status
+          setTimeout(() => {
+            updateVagrantVMStatus();
+          }, 2000);
+        } else {
+          startBtn.textContent = 'Failed to Start';
+          startBtn.className = startBtn.className.replace('bg-blue-600', 'bg-red-600');
+          setTimeout(() => {
+            startBtn.disabled = false;
+            startBtn.textContent = 'Start Vagrant VM';
+            startBtn.className = startBtn.className.replace('bg-red-600', 'bg-blue-600');
+          }, 3000);
+        }
+      }
+    } catch (error) {
+      console.error('Failed to start Vagrant VM:', error);
+      startBtn.textContent = 'Error Starting';
+      startBtn.className = startBtn.className.replace('bg-blue-600', 'bg-red-600');
+      setTimeout(() => {
+        startBtn.disabled = false;
+        startBtn.textContent = 'Start Vagrant VM';
+        startBtn.className = startBtn.className.replace('bg-red-600', 'bg-blue-600');
+      }, 3000);
     }
   }
   
@@ -760,23 +957,24 @@
     
     // Check if buttons exist before trying to modify them
     if (!startBtn || !stopBtn) {
-      console.log('⚠️ Buttons not found yet, skipping UI update');
+      console.log('🔍 Buttons not ready yet, skipping UI update');
       return;
     }
     
     // Store expanded state before updating
     const expandedVMs = new Set();
     localDevState.vms.forEach(vm => {
-      const arrow = document.getElementById(`arrow-${vm.pid}`);
+      const vmId = localDevState.currentProvider === 'vagrant' ? vm.name : vm.pid;
+      const arrow = document.getElementById(`arrow-${vmId}`);
       if (arrow && arrow.getAttribute('data-expanded') === 'true') {
-        expandedVMs.add(vm.pid);
+        expandedVMs.add(vmId);
       }
     });
     
     if (localDevState.vms.length === 0) {
       statusElement.innerHTML = `
         <div class="p-3 border border-blue-200 rounded-lg bg-blue-100">
-          <p class="text-blue-800 font-medium">No local VMs detected. Click "Start Local VM" to create one.</p>
+          <p class="text-blue-800">No local VMs detected. Click "Start Local VM" to create one.</p>
         </div>
       `;
       startBtn.disabled = false;
@@ -790,12 +988,12 @@
             <div class="border border-blue-200 rounded-lg bg-blue-50 overflow-hidden">
               <!-- Compact header bar -->
               <div class="flex items-center justify-between p-3 cursor-pointer hover:bg-blue-100 transition-colors" 
-                   onclick="toggleVMDetails('${vm.pid}')">
+                   onclick="toggleVMDetails('${localDevState.currentProvider === 'vagrant' ? vm.name : vm.pid}')">
                 <div class="flex items-center gap-3">
                   <div class="w-2.5 h-2.5 rounded-full ${vm.status === 'running' ? 'bg-green-500' : 'bg-gray-400'}"></div>
                   <div class="flex items-center gap-4">
                     <span class="font-medium text-blue-900">${vm.name}</span>
-                    <span class="text-sm text-blue-600">PID: ${vm.pid}</span>
+                    <span class="text-sm text-blue-600">PID: ${vm.pid || 'N/A'}</span>
                     <span class="text-sm text-blue-600">Port: ${vm.port}</span>
                   </div>
                 </div>
@@ -803,20 +1001,20 @@
                   <span class="px-2 py-1 text-xs rounded-full ${vm.status === 'running' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}">
                     ${vm.status}
                   </span>
-                  <svg class="w-4 h-4 text-blue-600 transition-transform duration-200" id="arrow-${vm.pid}" data-expanded="false">
+                  <svg class="w-4 h-4 text-blue-600 transition-transform duration-200" id="arrow-${localDevState.currentProvider === 'vagrant' ? vm.name : vm.pid}" data-expanded="false">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 9l6 6 6-6"/>
                   </svg>
                 </div>
               </div>
               
               <!-- Expandable details section -->
-              <div class="hidden border-t border-blue-200 bg-white" id="details-${vm.pid}">
+              <div class="hidden border-t border-blue-200 bg-white" id="details-${localDevState.currentProvider === 'vagrant' ? vm.name : vm.pid}">
                 <div class="p-4 space-y-4">
                   <div class="grid grid-cols-2 gap-6 text-sm">
                     <div>
                       <p class="font-medium text-blue-900 mb-2">Process Info:</p>
                       <div class="space-y-1">
-                        <p class="text-blue-700">PID: ${vm.pid}</p>
+                        <p class="text-blue-700">PID: ${vm.pid || 'N/A'}</p>
                         <p class="text-blue-700">Port: ${vm.port}</p>
                         <p class="text-blue-700">Host: ${vm.host}</p>
                       </div>
@@ -833,39 +1031,27 @@
                   </div>
                   
                   <div class="border-t border-blue-200 pt-4">
-                    <p class="font-medium text-blue-900 mb-2">Installation Progress:</p>
-                    <div class="bg-blue-50 p-3 rounded text-xs font-mono text-blue-800" id="qemu-details-${vm.pid}">
-                      <div class="space-y-2">
-                        <div class="flex items-center gap-2">
-                          <div class="w-2 h-2 bg-blue-500 rounded-full"></div>
-                          <span class="text-blue-800">Ubuntu Live Server booting...</span>
-                        </div>
-                        <div class="text-xs text-blue-600">
-                          This can take 5-15 minutes. The VM is currently booting from the Ubuntu ISO.
-                        </div>
-                        <div class="mt-2 p-2 bg-blue-100 rounded border border-blue-200">
-                          <div class="text-xs font-medium text-blue-800 mb-1">Current Status:</div>
-                          <div class="text-xs text-blue-700">• Booting from Ubuntu 24.04.3 Live Server ISO</div>
-                          <div class="text-xs text-blue-700">• Disk: ${vm.disk || '0'} MB (will grow to ~2-4 GB when Ubuntu installs)</div>
-                          <div class="text-xs text-blue-700">• Next: Ubuntu installation to disk, then NixOS conversion</div>
-                        </div>
-                      </div>
+                    <p class="font-medium text-blue-900 mb-2">${localDevState.currentProvider === 'vagrant' ? 'Vagrant VM Details:' : 'QEMU VM Details:'}</p>
+                    <div class="bg-blue-50 p-3 rounded text-xs font-mono text-blue-800" id="qemu-details-${localDevState.currentProvider === 'vagrant' ? vm.name : vm.pid}">
+                      Loading ${localDevState.currentProvider === 'vagrant' ? 'Vagrant' : 'QEMU'} details...
                     </div>
                   </div>
                   
                   <div class="border-t border-blue-200 pt-4">
                     <p class="font-medium text-blue-900 mb-2">Connection Test:</p>
                     <div class="flex gap-2">
-                      <button onclick="event.stopPropagation(); testVMConnection('${vm.pid}', '${vm.host}', ${vm.port})" 
-                              class="px-3 py-2 bg-blue-600 text-white text-xs rounded hover:bg-blue-700 transition-colors border border-blue-700 font-medium">
+                      <button onclick="event.stopPropagation(); testVMConnection('${localDevState.currentProvider === 'vagrant' ? vm.name : vm.pid}', '${vm.host}', ${vm.port})" 
+                              class="px-3 py-2 bg-blue-600 text-white text-xs rounded hover:bg-blue-700 transition-colors connection-test-button" 
+                              style="background-color: #2563eb !important; color: white !important; border: 2px solid #1d4ed8 !important;">
                         Test SSH Connection
                       </button>
-                      <button onclick="event.stopPropagation(); testVMService('${vm.pid}', '${vm.host}', 443)" 
-                              class="px-3 py-2 bg-green-600 text-white text-xs rounded hover:bg-green-700 transition-colors border border-green-700 font-medium">
+                      <button onclick="event.stopPropagation(); testVMService('${localDevState.currentProvider === 'vagrant' ? vm.name : vm.pid}', '${vm.host}', 443)" 
+                              class="px-3 py-2 bg-green-600 text-white text-xs rounded hover:bg-green-700 transition-colors connection-test-button"
+                              style="background-color: #16a34a !important; color: white !important; border: 2px solid #15803d !important;">
                         Test HTTPS (443)
                       </button>
                     </div>
-                    <div class="mt-2 text-xs text-blue-700" id="connection-status-${vm.pid}">
+                    <div class="mt-2 text-xs text-blue-700" id="connection-status-${localDevState.currentProvider === 'vagrant' ? vm.name : vm.pid}">
                       Click a button to test connection
                     </div>
                   </div>
@@ -979,26 +1165,54 @@
   
   // Load detailed QEMU VM information
   async function loadQEMUDetails(vmId) {
-    const vm = localDevState.vms.find(v => v.pid === vmId);
+    // For Vagrant VMs, vmId is the VM name (e.g., "default")
+    // For QEMU VMs, vmId is the PID
+    let vm;
+    if (localDevState.currentProvider === 'vagrant') {
+      vm = localDevState.vms.find(v => v.name === vmId);
+    } else {
+      vm = localDevState.vms.find(v => v.pid === vmId);
+    }
+    
     if (!vm) return;
     
     const detailsElement = document.getElementById(`qemu-details-${vmId}`);
     
     try {
-      // Fetch QEMU process details from our local dev server
-      const response = await fetch(`${CONFIG.LOCAL_DEV_API}/api/vm-details/${vm.pid}`);
+      // For Vagrant VMs, use the vagrant-vm-details endpoint
+      let response;
+      if (localDevState.currentProvider === 'vagrant') {
+        response = await fetch(`${CONFIG.LOCAL_DEV_API}/api/vagrant-vm-details/default`);
+      } else {
+        response = await fetch(`${CONFIG.LOCAL_DEV_API}/api/vm-details/${vm.pid}`);
+      }
       if (response.ok) {
         const data = await response.json();
-        detailsElement.innerHTML = `
-          <div class="space-y-1">
-            <div><strong>Command:</strong> ${data.command || 'Unknown'}</div>
-            <div><strong>Memory:</strong> ${data.memory || 'Unknown'}</div>
-            <div><strong>CPU:</strong> ${data.cpu || 'Unknown'}</div>
-            <div><strong>Working Dir:</strong> ${data.workingDir || 'Unknown'}</div>
-            <div><strong>Start Time:</strong> ${data.startTime || 'Unknown'}</div>
-            <div><strong>Status:</strong> ${data.status || 'Unknown'}</div>
-          </div>
-        `;
+        if (localDevState.currentProvider === 'vagrant' && data.vm) {
+          // Handle Vagrant VM data structure
+          detailsElement.innerHTML = `
+            <div class="space-y-1">
+              <div><strong>OS:</strong> ${data.vm.osInfo || 'Unknown'}</div>
+              <div><strong>Memory:</strong> ${data.vm.memory || 'Unknown'}%</div>
+              <div><strong>CPU:</strong> ${data.vm.cpu || 'Unknown'}%</div>
+              <div><strong>Uptime:</strong> ${data.vm.uptime || 'Unknown'}</div>
+              <div><strong>Status:</strong> ${data.vm.status || 'Unknown'}</div>
+              <div><strong>Provider:</strong> ${data.vm.provider || 'Unknown'}</div>
+            </div>
+          `;
+        } else {
+          // Handle direct QEMU data structure
+          detailsElement.innerHTML = `
+            <div class="space-y-1">
+              <div><strong>Command:</strong> ${data.command || 'Unknown'}</div>
+              <div><strong>Memory:</strong> ${data.memory || 'Unknown'}</div>
+              <div><strong>CPU:</strong> ${data.cpu || 'Unknown'}</div>
+              <div><strong>Working Dir:</strong> ${data.workingDir || 'Unknown'}</div>
+              <div><strong>Start Time:</strong> ${data.startTime || 'Unknown'}</div>
+              <div><strong>Status:</strong> ${data.status || 'Unknown'}</div>
+            </div>
+          `;
+        }
       } else {
         detailsElement.innerHTML = '<span class="text-red-600">Failed to load QEMU details</span>';
       }
@@ -1209,48 +1423,12 @@
     initializeLocalDev();
   }
   
-  // Also try to initialize when the page changes (for SPA navigation)
-  let lastUrl = location.href;
-  new MutationObserver(() => {
-    const url = location.href;
-    if (url !== lastUrl) {
-      lastUrl = url;
-      console.log('🔄 URL changed, reinitializing...');
-      setTimeout(initializeLocalDev, 100);
-    }
-  }).observe(document, { subtree: true, childList: true });
-  
-  // Force initialization after a delay to ensure the page is fully loaded
-  setTimeout(initializeLocalDev, 2000);
-  
-  // Additional fallback initialization attempts
-  setTimeout(initializeLocalDev, 5000);
-  setTimeout(initializeLocalDev, 10000);
-  
-  // Periodic page state checker for debugging
-  setInterval(() => {
+  // Single fallback initialization attempt after a delay
+  setTimeout(() => {
     if (!localDevState.isInitialized) {
-      console.log('🔍 Periodic page state check:');
-      logPageState();
-      
-      // Try to initialize if we're on the right page
-      if (isOnMainPage()) {
-        console.log('🎯 Page looks ready, attempting initialization...');
-        initializeLocalDev();
-      }
-    }
-  }, 5000);
-  
-  // Listen for any DOM changes that might indicate the page is ready
-  new MutationObserver((mutations) => {
-    // Check if any of our target elements appeared
-    if (isOnMainPage() && !localDevState.isInitialized) {
-      console.log('🎯 Target elements detected, initializing...');
+      console.log('🔄 Fallback initialization attempt...');
       initializeLocalDev();
     }
-  }).observe(document.body, {
-    childList: true,
-    subtree: true
-  });
+  }, 3000);
   
 })();

@@ -491,6 +491,191 @@ app.post('/api/test-connection', async (req, res) => {
   }
 });
 
+// Vagrant API endpoints (additional to existing QEMU support)
+app.get('/api/vagrant-check', async (req, res) => {
+  try {
+    const { stdout } = await execAsync('vagrant --version');
+    res.json({
+      available: true,
+      version: stdout.trim(),
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    res.json({
+      available: false,
+      version: '',
+      error: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+app.get('/api/vagrant-status', async (req, res) => {
+  try {
+    const { stdout } = await execAsync('cd ../vagrant-ubuntu && vagrant status --machine-readable');
+    const lines = stdout.trim().split('\n');
+    const vms = [];
+    
+    for (const line of lines) {
+      const parts = line.split(',');
+      if (parts.length >= 4 && parts[2] === 'state') {
+        const name = parts[1];
+        const status = parts[3];
+        vms.push({
+          name,
+          status,
+          provider: 'qemu',
+          host: 'localhost',
+          port: 2222 // Default SSH port for Vagrant
+        });
+      }
+    }
+    
+    res.json({
+      success: true,
+      vms,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    res.json({
+      success: false,
+      error: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+app.post('/api/vagrant-up', async (req, res) => {
+  try {
+    const { stdout } = await execAsync('cd ../vagrant-ubuntu && vagrant up --provider qemu');
+    res.json({
+      success: true,
+      output: stdout,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    res.json({
+      success: false,
+      error: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+app.post('/api/run-nixos-conversion', async (req, res) => {
+  try {
+    const script = `
+      curl -fsSL https://raw.githubusercontent.com/openmesh-network/xnode-manager-frontend/main/scripts/install-nixos.sh | bash
+    `;
+    const { stdout } = await execAsync(`cd ../vagrant-ubuntu && vagrant ssh -- -c "${script}"`);
+    res.json({
+      success: true,
+      output: stdout,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    res.json({
+      success: false,
+      error: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+app.get('/api/vagrant-vm-details/:name', async (req, res) => {
+  try {
+    const vmName = req.params.name;
+    
+    // Get Vagrant status
+    const { stdout: statusOutput } = await execAsync(`cd ../vagrant-ubuntu && vagrant status --machine-readable`);
+    const statusLines = statusOutput.trim().split('\n');
+    
+    // Find the VM status
+    let vmStatus = 'unknown';
+    for (const line of statusLines) {
+      const parts = line.split(',');
+      if (parts.length >= 4 && parts[1] === vmName && parts[2] === 'state') {
+        vmStatus = parts[3];
+        break;
+      }
+    }
+    
+    if (vmStatus === 'running') {
+      // Get QEMU process info
+      try {
+        const { stdout: psOutput } = await execAsync('ps aux | grep qemu-system-aarch64 | grep -v grep');
+        const lines = psOutput.trim().split('\n');
+        
+        for (const line of lines) {
+          const parts = line.split(/\s+/);
+          if (parts.length >= 2) {
+            const pid = parseInt(parts[1]);
+            if (!isNaN(pid)) {
+              // Get process details
+              const { stdout: processInfo } = await execAsync(`ps -p ${pid} -o pid,ppid,state,pcpu,pmem,etime,command`);
+              const processLines = processInfo.trim().split('\n');
+              
+              if (processLines.length > 1) {
+                const processData = processLines[1].split(/\s+/);
+                if (processData.length >= 6) {
+                  const cpu = parseFloat(processData[3]) || 0;
+                  const memory = parseFloat(processData[4]) || 0;
+                  const uptime = processData[5] || 'Unknown';
+                  
+                  res.json({
+                    success: true,
+                    vm: {
+                      name: vmName,
+                      status: vmStatus,
+                      pid: pid,
+                      cpu: cpu,
+                      memory: memory,
+                      uptime: uptime,
+                      osInfo: 'Ubuntu 22.10 ARM64 (Vagrant)',
+                      provider: 'qemu',
+                      host: 'localhost',
+                      port: 2222
+                    },
+                    timestamp: new Date().toISOString()
+                  });
+                  return;
+                }
+              }
+            }
+          }
+        }
+      } catch (psError) {
+        console.log('No QEMU processes found for Vagrant VM');
+      }
+    }
+    
+    // Fallback response
+    res.json({
+      success: true,
+      vm: {
+        name: vmName,
+        status: vmStatus,
+        pid: 'Unknown',
+        cpu: 0,
+        memory: 0,
+        uptime: 'Unknown',
+        osInfo: 'Ubuntu 22.10 ARM64 (Vagrant)',
+        provider: 'qemu',
+        host: 'localhost',
+        port: 2222
+      },
+      timestamp: new Date().toISOString()
+    });
+    
+  } catch (error) {
+    res.json({
+      success: false,
+      error: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
 // Health check
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
@@ -505,6 +690,11 @@ app.listen(PORT, () => {
   console.log(`   POST /api/stop-vm - Stop local VMs`);
   console.log(`   GET  /api/vm-details/:pid - Get detailed VM info`);
   console.log(`   POST /api/test-connection - Test VM connections`);
+  console.log(`   GET  /api/vagrant-check - Check Vagrant availability`);
+  console.log(`   GET  /api/vagrant-status - Get Vagrant VM status`);
+  console.log(`   GET  /api/vagrant-vm-details/:name - Get detailed Vagrant VM info`);
+  console.log(`   POST /api/vagrant-up - Start Vagrant VM`);
+  console.log(`   POST /api/run-nixos-conversion - Run NixOS conversion`);
   console.log(`   GET  /runtime-integration.js - Runtime integration script`);
   console.log(`   GET  /health - Health check`);
 });

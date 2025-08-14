@@ -72,3 +72,7 @@ open-dev-ide/*.log
 xnodeos-vm/*.iso
 xnodeos-vm/*.qcow2
 xnodeos-vm/cloud-init.iso
+xnodeos-vm/*.dmg
+
+# Vagrant VM files
+vagrant-ubuntu/
