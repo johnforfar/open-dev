@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OpenDev IDE - Local Development Bookmarklet</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .logo {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+        .bookmarklet {
+            background: #007bff;
+            color: white;
+            padding: 15px 25px;
+            border-radius: 6px;
+            text-decoration: none;
+            display: inline-block;
+            font-weight: bold;
+            margin: 20px 0;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+        }
+        .bookmarklet:hover {
+            background: #0056b3;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+        }
+        .instructions {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 6px;
+            margin: 20px 0;
+        }
+        .step {
+            margin-bottom: 15px;
+            padding-left: 20px;
+        }
+        .step-number {
+            background: #007bff;
+            color: white;
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            margin-right: 10px;
+        }
+        .code {
+            background: #e9ecef;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: 'Monaco', 'Menlo', monospace;
+            font-size: 0.9em;
+        }
+        .status {
+            background: #d4edda;
+            border: 1px solid #c3e6cb;
+            padding: 15px;
+            border-radius: 6px;
+            margin: 20px 0;
+        }
+        .success {
+            color: #28a745;
+            font-weight: bold;
+        }
+        .error {
+            color: #dc3545;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="logo">🚀</div>
+            <h1>OpenDev IDE - Local Development</h1>
+            <p>Automatically inject local development features into your main frontend</p>
+        </div>
+
+        <div class="status">
+            <h3>🚀 Backend Server Status:</h3>
+            <div id="server-status">Checking...</div>
+        </div>
+
+        <div class="instructions">
+            <h3>How to Enable Local Development Features:</h3>
+            
+            <div class="step">
+                <span class="step-number">1</span>
+                <strong>Drag this button to your browser's bookmark bar:</strong>
+                <br><br>
+                <a href="javascript:(function(){if(window.location.hostname==='localhost'||window.location.hostname==='127.0.0.1'){const script=document.createElement('script');script.src='http://localhost:3001/runtime-integration.js';script.onload=()=>console.log('✅ OpenDev IDE: Local dev features loaded');script.onerror=()=>console.log('❌ OpenDev IDE: Failed to load');document.head.appendChild(script);}else{alert('This only works on localhost!')}})()" class="bookmarklet">
+                    🚀 Enable OpenDev IDE
+                </a>
+            </div>
+            
+            <div class="step">
+                <span class="step-number">2</span>
+                <strong>Go to your main frontend:</strong>
+                <div class="code">http://localhost:3000</div>
+            </div>
+            
+            <div class="step">
+                <span class="step-number">3</span>
+                <strong>Click the bookmarklet in your bookmark bar</strong>
+            </div>
+            
+            <div class="step">
+                <span class="step-number">4</span>
+                <strong>Watch the magic happen!</strong> You'll see:
+                <ul>
+                    <li>✅ "Local VM" button appears next to Deploy/Import/Reset</li>
+                    <li>✅ Wallet authentication bypassed</li>
+                    <li>✅ Local VMs detected and displayed</li>
+                    <li>✅ Import button becomes enabled</li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="note">
+            <h3>💡 What This Does:</h3>
+            <p>This bookmarklet automatically injects local development features into your main frontend without modifying any files. It:</p>
+            <ul>
+                <li>Detects if you're running on localhost</li>
+                <li>Loads the runtime integration script</li>
+                <li>Adds local VM management to the existing UI</li>
+                <li>Bypasses wallet authentication for local development</li>
+            </ul>
+        </div>
+
+        <div class="note">
+            <h3>🔧 Alternative: Manual Console Command</h3>
+            <p>If you prefer, you can also run this in your browser console:</p>
+            <div class="code">fetch('http://localhost:3001/runtime-integration.js').then(r => r.text()).then(code => eval(code))</div>
+        </div>
+        
+
+    </div>
+
+    <script>
+        // Check if the local development server is running
+        async function checkServerStatus() {
+            try {
+                const response = await fetch('http://localhost:3001/health');
+                const data = await response.json();
+                
+                if (data.status === 'ok') {
+                    document.getElementById('server-status').innerHTML = 
+                        '<span class="success">✅ Local development server is running on port 3001</span><br>' +
+                        '<span class="success">🚀 Ready to inject local development features!</span>';
+                } else {
+                    document.getElementById('server-status').innerHTML = 
+                        '<span class="error">❌ Server responded with unexpected status</span>';
+                }
+            } catch (error) {
+                document.getElementById('server-status').innerHTML = 
+                    '<span class="error">❌ Local development server is not running</span><br>' +
+                    '<span class="error">Please start the server first: cd open-dev-ide && nohup node local-dev-server.js > server.log 2>&1 &</span>';
+            }
+        }
+
+        // Check status every 5 seconds
+        checkServerStatus();
+        setInterval(checkServerStatus, 5000);
+        
+
+    </script>
+</body>
+</html>

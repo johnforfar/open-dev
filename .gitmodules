@@ -1,0 +1,18 @@
+[submodule "openmesh-network/xnode-manager-frontend"]
+	path = openmesh-network/xnode-manager-frontend
+	url = https://github.com/Openmesh-Network/xnode-manager-frontend.git
+[submodule "openmesh-network/xnode-rust-template"]
+	path = openmesh-network/xnode-rust-template
+	url = https://github.com/openmesh-network/xnode-rust-template.git
+[submodule "openmesh-network/xnode-python-template"]
+	path = openmesh-network/xnode-python-template
+	url = https://github.com/openmesh-network/xnode-python-template.git
+[submodule "openmesh-network/xnode-nodejs-template"]
+	path = openmesh-network/xnode-nodejs-template
+	url = https://github.com/openmesh-network/xnode-nodejs-template.git
+[submodule "openmesh-network/xnode-nextjs-template"]
+	path = openmesh-network/xnode-nextjs-template
+	url = https://github.com/openmesh-network/xnode-nextjs-template.git
+[submodule "openxai-network/xnode-ai-chat"]
+	path = openxai-network/xnode-ai-chat
+	url = https://github.com/openxai-network/xnode-ai-chat.git

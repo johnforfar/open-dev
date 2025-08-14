@@ -1,0 +1,27 @@
+{
+  "name": "open-dev-ide",
+  "version": "1.0.0",
+  "description": "Local development IDE for OpenDev with VM management",
+  "main": "local-dev-server.js",
+  "scripts": {
+    "dev": "node local-dev-server.js",
+    "start": "node local-dev-server.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0"
+  },
+  "keywords": [
+    "opendev",
+    "local-development",
+    "qemu",
+    "nixos",
+    "vm-management"
+  ],
+  "author": "OpenDev Team",
+  "license": "MIT"
+}
